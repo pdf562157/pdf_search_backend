@@ -8,6 +8,10 @@ import hashlib
 
 app = FastAPI()
 
+@app.get("/ping")
+def ping():
+    return {"status": "ok"}
+
 # Allow frontend connections (desktop GUI, mobile app, etc.)
 app.add_middleware(
     CORSMiddleware,
