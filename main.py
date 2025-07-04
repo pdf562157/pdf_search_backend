@@ -1,15 +1,15 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import List
 import os
 import json
 
 app = FastAPI()
 
-# Allow all origins for development; tighten in production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, restrict this
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -24,17 +24,18 @@ try:
         pdf_links = json.load(f)
 except FileNotFoundError:
     pdf_links = {}
-    print("[WARNING] pdf_links.json not found.")
 except json.JSONDecodeError as e:
     raise RuntimeError(f"[ERROR] Failed to load pdf_links.json: {e}")
+
+class SearchRequest(BaseModel):
+    keywords: List[str]
 
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
 
-@app.get("/search")
-def search_keyword(q: str = Query(..., description="Search keyword")):
-    q_lower = q.lower()
+@app.post("/search")
+def search_keywords(req: SearchRequest):
     results = []
 
     for filename in os.listdir(OCR_JSON_DIR):
@@ -46,12 +47,15 @@ def search_keyword(q: str = Query(..., description="Search keyword")):
             with open(filepath, "r", encoding="utf-8") as f:
                 ocr_data = json.load(f)
         except Exception as e:
-            print(f"[ERROR] Failed to load {filename}: {e}")
             continue
 
         for page, text in ocr_data.items():
-            if q_lower in text.lower():
-                matched_para = next((p for p in text.split("\n\n") if q_lower in p.lower()), "")
+            text_lower = text.lower()
+            if all(k.lower() in text_lower for k in req.keywords):
+                matched_para = next(
+                    (p for p in text.split("\n\n") if all(k.lower() in p.lower() for k in req.keywords)),
+                    ""
+                )
                 file_base = os.path.splitext(filename)[0]
                 results.append({
                     "filename": file_base + ".pdf",
@@ -59,6 +63,6 @@ def search_keyword(q: str = Query(..., description="Search keyword")):
                     "paragraph": matched_para.strip(),
                     "link": pdf_links.get(file_base + ".pdf", "")
                 })
-                break  # Return only first match per file for performance
+                break  # One match per file
 
     return {"count": len(results), "results": results}
